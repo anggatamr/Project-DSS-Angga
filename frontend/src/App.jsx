@@ -10,7 +10,7 @@ import AnimatedNumber from './components/AnimatedNumber';
 import SkeletonLoader from './components/SkeletonLoader';
 import { solveSAWClient, solveTOPSISClient } from './utils/clientSolver';
 
-const BACKEND_URL = 'http://127.0.0.1:8000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 function App() {
   const steps = [
