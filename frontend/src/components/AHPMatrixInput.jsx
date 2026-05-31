@@ -30,6 +30,8 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
     isConsistent: true
   });
 
+  const [inconsistencySuggestion, setInconsistencySuggestion] = useState(null);
+
   // Recalculate weights & CR whenever matrix changes
   useEffect(() => {
     if (n === 0) return;
@@ -90,10 +92,52 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
         cr,
         isConsistent
       });
+
+      // 5. Generate consistency suggestions if inconsistent
+      if (!isConsistent && n > 2) {
+        // Calculate inconsistency index per cell (absolute diff from expected ratios)
+        let maxDiff = -1;
+        let worstRow = 0;
+        let worstCol = 0;
+        
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) {
+            const expectedRatio = weights[i] / (weights[j] || 1e-9);
+            const actualRatio = matrix[i][j];
+            const diff = Math.abs(actualRatio - expectedRatio);
+            if (diff > maxDiff) {
+              maxDiff = diff;
+              worstRow = i;
+              worstCol = j;
+            }
+          }
+        }
+
+        // Recommend ideal ratio value rounded to closest standard scale
+        const idealRatio = weights[worstRow] / (weights[worstCol] || 1e-9);
+        let suggestedVal = Math.round(idealRatio);
+        if (suggestedVal > 9) suggestedVal = 9;
+        if (suggestedVal < 1) {
+          // If less than 1, suggest fraction
+          const reciprocal = Math.round(1 / idealRatio);
+          suggestedVal = reciprocal > 9 ? 1/9 : 1/reciprocal;
+        }
+
+        setInconsistencySuggestion({
+          rowIdx: worstRow,
+          colIdx: worstCol,
+          rowName: criteria[worstRow].name,
+          colName: criteria[worstCol].name,
+          suggestedValue: suggestedVal
+        });
+      } else {
+        setInconsistencySuggestion(null);
+      }
+
     } catch (err) {
       console.error("Error calculating AHP weights", err);
     }
-  }, [matrix, n]);
+  }, [matrix, n, criteria]);
 
   const handleCellChange = (i, j, val) => {
     const floatVal = parseFloat(val);
@@ -105,6 +149,12 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
       copy[j][i] = 1.0 / floatVal;
       return copy;
     });
+  };
+
+  const applySuggestion = () => {
+    if (!inconsistencySuggestion) return;
+    const { rowIdx, colIdx, suggestedValue } = inconsistencySuggestion;
+    handleCellChange(rowIdx, colIdx, suggestedValue);
   };
 
   const saveWeights = () => {
@@ -155,14 +205,23 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
                   }
                   
                   const isUpper = i < j;
+                  const isWorstCell = inconsistencySuggestion && 
+                    ((inconsistencySuggestion.rowIdx === i && inconsistencySuggestion.colIdx === j) ||
+                     (inconsistencySuggestion.rowIdx === j && inconsistencySuggestion.colIdx === i));
                   
                   if (isUpper) {
                     // Render interactive selector
                     return (
-                      <td key={j} style={{ textAlign: 'center' }}>
+                      <td key={j} style={{ textAlign: 'center', backgroundColor: isWorstCell ? '#FFFDF0' : 'inherit' }}>
                         <select
                           className="form-control"
-                          style={{ padding: '6px', fontSize: '12px', minWidth: '120px' }}
+                          style={{ 
+                            padding: '6px', 
+                            fontSize: '12px', 
+                            minWidth: '120px',
+                            borderColor: isWorstCell ? '#E9D8FD' : 'var(--border-color)',
+                            boxShadow: isWorstCell ? '0 0 0 3px rgba(159, 122, 234, 0.15)' : 'none'
+                          }}
                           value={matrix[i][j]}
                           onChange={(e) => handleCellChange(i, j, e.target.value)}
                         >
@@ -181,7 +240,7 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
                   } else {
                     // Lower part is read-only reciprocal
                     return (
-                      <td key={j} style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                      <td key={j} style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '12px', backgroundColor: isWorstCell ? '#FFFDF0' : 'inherit' }}>
                         {matrix[i][j] >= 1 ? matrix[i][j].toFixed(2) : `1/${Math.round(1 / matrix[i][j])}`}
                       </td>
                     );
@@ -192,6 +251,46 @@ const AHPMatrixInput = ({ criteria, onSave }) => {
           </tbody>
         </table>
       </div>
+
+      {inconsistencySuggestion && (
+        <div 
+          className="alert alert-warning step-transition" 
+          style={{ 
+            marginTop: '20px', 
+            borderLeft: '4px solid #D69E2E', 
+            padding: '16px',
+            backgroundColor: '#FEFCBF',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}
+        >
+          <div style={{ flexGrow: 1 }}>
+            <strong style={{ color: '#744210' }}>💡 Consistency Assistant:</strong>
+            <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: '#744210', lineHeight: '1.4' }}>
+              Matriks perbandingan Anda tidak logis secara konsisten. Coba perbaiki hubungan antara <strong>{inconsistencySuggestion.rowName}</strong> dan <strong>{inconsistencySuggestion.colName}</strong>. 
+              Saran nilai koreksi: <strong>{inconsistencySuggestion.suggestedValue >= 1 ? inconsistencySuggestion.suggestedValue : `1/${Math.round(1 / inconsistencySuggestion.suggestedValue)}`}</strong>.
+            </p>
+          </div>
+          <button 
+            type="button"
+            className="btn btn-secondary"
+            style={{ 
+              backgroundColor: 'white', 
+              borderColor: '#D69E2E', 
+              color: '#744210',
+              padding: '8px 16px',
+              fontSize: '12px',
+              fontWeight: '700'
+            }}
+            onClick={applySuggestion}
+          >
+            Terapkan Rekomendasi
+          </button>
+        </div>
+      )}
 
       <div className="grid-2" style={{ marginTop: '20px' }}>
         <div className="card" style={{ padding: '20px', marginBottom: 0 }}>

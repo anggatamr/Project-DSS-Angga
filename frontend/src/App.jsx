@@ -5,10 +5,12 @@ import AHPMatrixInput from './components/AHPMatrixInput';
 import ResultsChart from './components/ResultsChart';
 import SensitivitySlider from './components/SensitivitySlider';
 import RadarChart from './components/RadarChart';
+import OnboardingGuide from './components/OnboardingGuide';
 import ToastContainer, { useToast } from './components/Toast';
 import AnimatedNumber from './components/AnimatedNumber';
 import SkeletonLoader from './components/SkeletonLoader';
 import { solveSAWClient, solveTOPSISClient } from './utils/clientSolver';
+import { calculateSpearman } from './utils/spearman';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -48,6 +50,8 @@ function App() {
   
   // Computation states
   const [rankings, setRankings] = useState([]);
+  const [sawRankings, setSawRankings] = useState([]); // Secondary ranking list for dual analysis
+  const [spearman, setSpearman] = useState(null); // Spearman correlation results
   const [stabilityRates, setStabilityRates] = useState({}); // maps alt_name -> rate (%)
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -64,6 +68,7 @@ function App() {
   const [gsTargetAltId, setGsTargetAltId] = useState('');
   const [gsChangingCritId, setGsChangingCritId] = useState('');
   const [gsTargetRank, setGsTargetRank] = useState(1);
+  const [gsBudgetLimit, setGsBudgetLimit] = useState('');
   const [gsResult, setGsResult] = useState(null);
   const [gsLoading, setGsLoading] = useState(false);
 
@@ -87,6 +92,8 @@ function App() {
         if (parsed.alternatives) setAlternatives(parsed.alternatives);
         if (parsed.matrix) setMatrix(parsed.matrix);
         if (parsed.rankings) setRankings(parsed.rankings);
+        if (parsed.sawRankings) setSawRankings(parsed.sawRankings);
+        if (parsed.spearman) setSpearman(parsed.spearman);
         if (parsed.stabilityRates) setStabilityRates(parsed.stabilityRates);
         if (parsed.qAnswers) setQAnswers(parsed.qAnswers);
         if (parsed.recommendation) setRecommendation(parsed.recommendation);
@@ -110,6 +117,8 @@ function App() {
         alternatives,
         matrix,
         rankings,
+        sawRankings,
+        spearman,
         stabilityRates,
         qAnswers,
         recommendation
@@ -118,7 +127,7 @@ function App() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [projectId, projectTitle, step, chosenMethod, criterias, alternatives, matrix, rankings, stabilityRates, qAnswers, recommendation]);
+  }, [projectId, projectTitle, step, chosenMethod, criterias, alternatives, matrix, rankings, sawRankings, spearman, stabilityRates, qAnswers, recommendation]);
 
   // Trigger confetti particles
   useEffect(() => {
@@ -375,28 +384,36 @@ function App() {
         if (projData.criterias.length > 0) setGsChangingCritId(projData.criterias[0].id);
       }
       
-      // 2. Call Calculate Endpoint
-      const calcRes = await fetch(`${BACKEND_URL}/api/v1/solver/calculate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          project_id: activeId,
-          method: chosenMethod
-        })
-      });
+      // Calculate dual rankings (both TOPSIS and SAW)
+      const critTypes = correctedCriterias.map(c => c.type);
+      const currentWeights = correctedCriterias.map(c => c.weight);
       
-      if (!calcRes.ok) {
-        const err = await calcRes.json();
-        throw new Error(err.detail || 'Gagal melakukan perhitungan MCDM.');
-      }
+      const topsisRes = solveTOPSISClient(matrix, currentWeights, critTypes);
+      const sawRes = solveSAWClient(matrix, currentWeights, critTypes);
+
+      const computedTopsisRankings = alternatives.map((alt, idx) => ({
+        id: alt.id || `alt-${idx}`,
+        name: alt.name,
+        score: topsisRes.scores[idx]
+      })).sort((a, b) => b.score - a.score).map((item, idx) => ({ ...item, rank: idx + 1 }));
+
+      const computedSawRankings = alternatives.map((alt, idx) => ({
+        id: alt.id || `alt-${idx}`,
+        name: alt.name,
+        score: sawRes.scores[idx]
+      })).sort((a, b) => b.score - a.score).map((item, idx) => ({ ...item, rank: idx + 1 }));
+
+      setRankings(computedTopsisRankings);
+      setSawRankings(computedSawRankings);
       
-      const calcData = await calcRes.json();
-      setRankings(calcData.rankings);
+      // Compute Spearman Correlation
+      const spearmanResult = calculateSpearman(computedTopsisRankings, computedSawRankings);
+      setSpearman(spearmanResult);
 
       // 3. Trigger Risk Monte Carlo simulation
       await runMonteCarloSimulation(activeId);
 
-      addToast('Perhitungan MCDM & Simulasi Stokastik Monte Carlo Selesai!', 'success', 'Computation Success');
+      addToast('Perhitungan MCDM & Analisis Komparasi Dual-Metode Selesai!', 'success', 'Computation Success');
       setStep(3);
     } catch (err) {
       setErrorMsg(err.message);
@@ -406,7 +423,7 @@ function App() {
     }
   };
 
-  // Run Goal seeking via backend numerical Bisection solver
+  // Run Goal seeking via backend numerical Bisection solver with Multi-Constraint Budget checks
   const handleRunGoalSeeking = async () => {
     if (!projectId || !gsTargetAltId || !gsChangingCritId) return;
     setGsLoading(true);
@@ -427,6 +444,23 @@ function App() {
         throw new Error(err.detail || "Gagal memproses Goal Seeking.");
       }
       const data = await res.json();
+      
+      // Apply budget constraint check client-side if success
+      if (data.success && data.target_value !== null && gsBudgetLimit) {
+        const selectedCrit = criterias.find(c => c.id === gsChangingCritId);
+        const limitVal = parseFloat(gsBudgetLimit);
+        
+        if (selectedCrit && selectedCrit.type === 'cost' && data.target_value > limitVal) {
+          // If suggested cost is higher than budget, solver fails constraints
+          setGsResult({
+            success: false,
+            message: `Solver dibatalkan: Batas nilai kriteria '${selectedCrit.name}' (${data.target_value.toFixed(2)}) melampaui batasan anggaran maksimum yang Anda tetapkan (${limitVal.toFixed(2)}).`
+          });
+          addToast('Nilai solusi melampaui batasan anggaran!', 'error', 'Constraint Violated');
+          return;
+        }
+      }
+
       setGsResult(data);
       if (data.success) {
         addToast('Goal-Seek Solver menemukan solusi optimal!', 'success', 'Solver Solution Found');
@@ -461,27 +495,30 @@ function App() {
     });
   };
 
-  // Generic recalculation helper
+  // Generic recalculation helper for dual algorithms
   const recalculateRankings = (currentMatrix, currentWeights) => {
     const critTypes = criterias.map(c => c.type);
-    let solveRes;
     
-    if (chosenMethod === 'SAW') {
-      solveRes = solveSAWClient(currentMatrix, currentWeights, critTypes);
-    } else {
-      solveRes = solveTOPSISClient(currentMatrix, currentWeights, critTypes);
-    }
+    const topsisRes = solveTOPSISClient(currentMatrix, currentWeights, critTypes);
+    const sawRes = solveSAWClient(currentMatrix, currentWeights, critTypes);
     
-    const nextRankings = alternatives.map((alt, idx) => ({
+    const computedTopsisRankings = alternatives.map((alt, idx) => ({
       id: alt.id || `alt-${idx}`,
       name: alt.name,
-      score: solveRes.scores[idx]
-    }));
+      score: topsisRes.scores[idx]
+    })).sort((a, b) => b.score - a.score).map((item, idx) => ({ ...item, rank: idx + 1 }));
+
+    const computedSawRankings = alternatives.map((alt, idx) => ({
+      id: alt.id || `alt-${idx}`,
+      name: alt.name,
+      score: sawRes.scores[idx]
+    })).sort((a, b) => b.score - a.score).map((item, idx) => ({ ...item, rank: idx + 1 }));
     
-    const sorted = [...nextRankings].sort((a, b) => b.score - a.score);
-    const finalRankings = sorted.map((item, idx) => ({ ...item, rank: idx + 1 }));
+    setRankings(computedTopsisRankings);
+    setSawRankings(computedSawRankings);
     
-    setRankings(finalRankings);
+    const spearmanResult = calculateSpearman(computedTopsisRankings, computedSawRankings);
+    setSpearman(spearmanResult);
   };
 
   const handleDownloadReport = () => {
@@ -509,6 +546,8 @@ function App() {
       [0.0, 0.0]
     ]);
     setRankings([]);
+    setSawRankings([]);
+    setSpearman(null);
     setStabilityRates({});
     setGsResult(null);
     setErrorMsg('');
@@ -534,7 +573,7 @@ function App() {
           </p>
         </div>
         <div className="meta">
-          ⚡ Stokastik MC & Goal-Seek Solver
+          ⚡ Komparasi Spearman & Optimasi Solver
         </div>
       </header>
 
@@ -544,6 +583,9 @@ function App() {
         steps={steps} 
         onStepClick={(stepNum) => setStep(stepNum)}
       />
+
+      {/* Onboarding Guide banner */}
+      <OnboardingGuide step={step} />
 
       {loading && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -604,7 +646,7 @@ function App() {
               <div style={{ marginTop: '24px', display: 'flex', gap: '16px' }}>
                 <div style={{ flexGrow: 1 }}>
                   <label style={{ fontWeight: '700', display: 'block', marginBottom: '6px' }}>
-                    Metode Perhitungan yang Dipakai:
+                    Metode Perhitungan Utama:
                   </label>
                   <select
                     className="form-control"
@@ -681,7 +723,7 @@ function App() {
             <div className="card step-transition">
               <h2>Analisis Sensitivitas & What-If Dashboard</h2>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontWeight: '500' }}>
-                Metode terhitung: <strong style={{ color: 'var(--accent-primary)' }}>{chosenMethod}</strong>. Modifikasi slider bobot di bawah atau ubah performa data matriks keputusan secara langsung untuk melihat pergeseran peringkat secara asinkronus (&lt; 100ms).
+                Metode utama: <strong style={{ color: 'var(--accent-primary)' }}>{chosenMethod}</strong>. Modifikasi slider bobot di bawah atau ubah performa data matriks keputusan secara langsung untuk melihat pergeseran peringkat secara asinkronus (&lt; 100ms).
               </p>
 
               <div className="grid-2" style={{ alignItems: 'start' }}>
@@ -744,8 +786,14 @@ function App() {
                   
                   {/* Peringkat Bar Chart */}
                   <div className="card" style={{ padding: '24px', marginBottom: 0 }}>
-                    <h3 style={{ marginBottom: '16px' }}>🏆 Peringkat Alternatif Dinamis</h3>
-                    <ResultsChart rankings={rankings} stabilityRates={stabilityRates} />
+                    <h3 style={{ marginBottom: '16px' }}>🏆 Komparasi Peringkat Dual-Metode</h3>
+                    <ResultsChart 
+                      rankings={rankings} 
+                      stabilityRates={stabilityRates} 
+                      showDual={true} 
+                      sawRankings={sawRankings} 
+                      spearman={spearman} 
+                    />
                   </div>
 
                   {/* Custom Radar Spider Chart */}
@@ -773,49 +821,66 @@ function App() {
                   Gunakan matematika optimasi untuk mencari berapa batas nilai input kriteria yang harus dipenuhi oleh laptop target agar bisa menembus Peringkat Juara.
                 </p>
 
-                <div className="grid-2" style={{ gap: '16px' }}>
-                  <div className="form-group" style={{ marginBottom: '10px' }}>
-                    <label style={{ fontSize: '12px' }}>Pilih Alternatif Target:</label>
-                    <select 
-                      className="form-control"
-                      value={gsTargetAltId}
-                      onChange={(e) => setGsTargetAltId(e.target.value)}
-                    >
-                      {alternatives.map(alt => (
-                        <option key={alt.id} value={alt.id}>{alt.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: '10px' }}>
-                    <label style={{ fontSize: '12px' }}>Kriteria Pengubah:</label>
-                    <select 
-                      className="form-control"
-                      value={gsChangingCritId}
-                      onChange={(e) => setGsChangingCritId(e.target.value)}
-                    >
-                      {criterias.map(crit => (
-                        <option key={crit.id} value={crit.id}>{crit.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Natural Language UI for Awam User onboarding */}
+                <div style={{ 
+                  backgroundColor: '#FFF', 
+                  padding: '16px', 
+                  borderRadius: 'var(--radius-md)', 
+                  border: '1px solid var(--border-color)',
+                  marginBottom: '20px',
+                  fontSize: '13.5px',
+                  lineHeight: '2.0',
+                  color: 'var(--text-primary)'
+                }}>
+                  Saya ingin alternatif{' '}
+                  <select 
+                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: 'bold' }}
+                    value={gsTargetAltId}
+                    onChange={(e) => setGsTargetAltId(e.target.value)}
+                  >
+                    {alternatives.map(alt => (
+                      <option key={alt.id} value={alt.id}>{alt.name}</option>
+                    ))}
+                  </select>
+                  {' '}mencapai peringkat target{' '}
+                  <input 
+                    type="number"
+                    min="1"
+                    max={alternatives.length}
+                    style={{ width: '60px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: 'bold', textAlign: 'center' }}
+                    value={gsTargetRank}
+                    onChange={(e) => setGsTargetRank(e.target.value)}
+                  />
+                  {' '}dengan mengubah nilai kriteria{' '}
+                  <select 
+                    style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: 'bold' }}
+                    value={gsChangingCritId}
+                    onChange={(e) => setGsChangingCritId(e.target.value)}
+                  >
+                    {criterias.map(crit => (
+                      <option key={crit.id} value={crit.id}>{crit.name}</option>
+                    ))}
+                  </select>
+                  {criterias.find(c => c.id === gsChangingCritId)?.type === 'cost' && (
+                    <>
+                      {' '}dengan batasan anggaran maksimum senilai{' '}
+                      <input 
+                        type="number"
+                        placeholder="Tanpa batasan"
+                        style={{ width: '130px', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontWeight: 'bold' }}
+                        value={gsBudgetLimit}
+                        onChange={(e) => setGsBudgetLimit(e.target.value)}
+                      />
+                    </>
+                  )}
+                  .
                 </div>
 
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
-                  <div style={{ width: '200px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: '700' }}>Target Peringkat:</label>
-                    <input 
-                      type="number"
-                      min="1"
-                      className="form-control"
-                      value={gsTargetRank}
-                      onChange={(e) => setGsTargetRank(e.target.value)}
-                    />
-                  </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button 
                     type="button" 
                     className="btn btn-primary"
-                    style={{ marginTop: '22px', background: 'linear-gradient(135deg, #5A67D8, #434190)', boxShadow: '0 4px 12px rgba(90, 103, 216, 0.2)' }}
+                    style={{ background: 'linear-gradient(135deg, #5A67D8, #434190)', boxShadow: '0 4px 12px rgba(90, 103, 216, 0.2)' }}
                     onClick={handleRunGoalSeeking}
                     disabled={gsLoading}
                   >
