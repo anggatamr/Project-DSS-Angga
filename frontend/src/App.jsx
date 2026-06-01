@@ -9,8 +9,15 @@ import OnboardingGuide from './components/OnboardingGuide';
 import ToastContainer, { useToast } from './components/Toast';
 import AnimatedNumber from './components/AnimatedNumber';
 import SkeletonLoader from './components/SkeletonLoader';
+import ScenarioManager from './components/ScenarioManager';
+import RobustnessIndex from './components/RobustnessIndex';
+import CorrelationHeatmap from './components/CorrelationHeatmap';
+import SanityCheckReport from './components/SanityCheckReport';
+import QuickStartTemplates from './components/QuickStartTemplates';
 import { solveSAWClient, solveTOPSISClient } from './utils/clientSolver';
 import { calculateSpearman } from './utils/spearman';
+import { analyzeCriteriaCorrelation } from './utils/correlationAnalysis';
+import { computeDataQuality, runSanityCheck } from './utils/dataQuality';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -75,6 +82,43 @@ function App() {
   // Confetti particles state for trophies
   const [confetti, setConfetti] = useState([]);
 
+  // NEW: Dark mode
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('dss_dark_mode') === 'true';
+  });
+
+  // NEW: Correlation warnings
+  const [correlationWarnings, setCorrelationWarnings] = useState([]);
+
+  // NEW: Sanity check anomalies
+  const [sanityAnomalies, setSanityAnomalies] = useState([]);
+
+  // NEW: Data quality report
+  const [dataQualityReport, setDataQualityReport] = useState(null);
+
+  // NEW: Collapsible section states (progressive disclosure)
+  const [showCorrelationSection, setShowCorrelationSection] = useState(false);
+
+  // Dark mode effect
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('dss_dark_mode', darkMode);
+  }, [darkMode]);
+
+  // Correlation analysis whenever matrix or criterias change
+  useEffect(() => {
+    if (matrix.length >= 3 && criterias.length >= 2) {
+      const warnings = analyzeCriteriaCorrelation(matrix, criterias);
+      setCorrelationWarnings(warnings);
+    } else {
+      setCorrelationWarnings([]);
+    }
+  }, [matrix, criterias]);
+
   // 2. State Retention & Auto-save (Every 5 seconds)
   const isInitialMount = useRef(true);
 
@@ -84,6 +128,13 @@ function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        // Version guard: if saved state is missing new fields, clear it to avoid crashes
+        const stateVersion = parsed._version || 1;
+        if (stateVersion < 2) {
+          localStorage.removeItem('dss_state');
+          isInitialMount.current = false;
+          return;
+        }
         if (parsed.projectId) setProjectId(parsed.projectId);
         if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
         if (parsed.step) setStep(parsed.step);
@@ -99,6 +150,7 @@ function App() {
         if (parsed.recommendation) setRecommendation(parsed.recommendation);
       } catch (e) {
         console.error("Failed to parse saved state", e);
+        localStorage.removeItem('dss_state');
       }
     }
     isInitialMount.current = false;
@@ -109,6 +161,7 @@ function App() {
     const interval = setInterval(() => {
       if (isInitialMount.current) return;
       const stateToSave = {
+        _version: 2,
         projectId,
         projectTitle,
         step,
@@ -413,6 +466,15 @@ function App() {
       // 3. Trigger Risk Monte Carlo simulation
       await runMonteCarloSimulation(activeId);
 
+      // 4. Run sanity check and data quality
+      const quality = computeDataQuality(matrix, correctedCriterias, alternatives);
+      setDataQualityReport(quality);
+      const anomalies = runSanityCheck(matrix, correctedCriterias, computedTopsisRankings);
+      setSanityAnomalies(anomalies);
+      if (anomalies.length > 0) {
+        addToast(`${anomalies.length} anomali terdeteksi pada hasil peringkat.`, 'info', 'Sanity Check');
+      }
+
       addToast('Perhitungan MCDM & Analisis Komparasi Dual-Metode Selesai!', 'success', 'Computation Success');
       setStep(3);
     } catch (err) {
@@ -521,6 +583,29 @@ function App() {
     setSpearman(spearmanResult);
   };
 
+  // Handle Quick Start template application
+  const handleApplyTemplate = ({ criterias: tCriterias, alternatives: tAlts, matrix: tMatrix, title, method }) => {
+    if (title) setProjectTitle(title);
+    if (method) setChosenMethod(method);
+    setCriterias(tCriterias);
+    setAlternatives(tAlts);
+    setMatrix(tMatrix);
+    setRankings([]);
+    setSawRankings([]);
+    setSpearman(null);
+    setStabilityRates({});
+    setSanityAnomalies([]);
+    setDataQualityReport(null);
+  };
+
+  // Handle scenario restore
+  const handleRestoreScenario = (restoredCriterias) => {
+    setCriterias(restoredCriterias);
+    const newWeights = restoredCriterias.map(c => c.weight);
+    recalculateRankings(matrix, newWeights);
+    addToast('Skenario berhasil diterapkan!', 'success', 'Scenario Restored');
+  };
+
   const handleDownloadReport = () => {
     if (!projectId) return;
     window.open(`${BACKEND_URL}/api/v1/projects/${projectId}/report`);
@@ -557,6 +642,9 @@ function App() {
       multipleTypes: 'ya',
       prefComplexity: 'sederhana'
     });
+    setSanityAnomalies([]);
+    setDataQualityReport(null);
+    setCorrelationWarnings([]);
     addToast('Seluruh konfigurasi dasbor berhasil di-reset.', 'info', 'System Reset');
   };
 
@@ -572,8 +660,31 @@ function App() {
             Mata Kuliah: Teori Pengambilan Keputusan (TPK) – Advanced Corporate Analytics Edition
           </p>
         </div>
-        <div className="meta">
-          ⚡ Komparasi Spearman & Optimasi Solver
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Dark Mode Toggle */}
+          <button
+            onClick={() => setDarkMode(prev => !prev)}
+            style={{
+              background: darkMode ? '#2d3748' : 'var(--accent-muted)',
+              border: 'none',
+              borderRadius: '20px',
+              padding: '8px 14px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '700',
+              color: darkMode ? '#e2e8f0' : 'var(--accent-hover)',
+              transition: 'var(--transition)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+            title={darkMode ? 'Beralih ke Mode Terang' : 'Beralih ke Mode Gelap'}
+          >
+            {darkMode ? '☀️ Terang' : '🌙 Gelap'}
+          </button>
+          <div className="meta">
+            ⚡ Komparasi Spearman & Optimasi Solver
+          </div>
         </div>
       </header>
 
@@ -671,18 +782,68 @@ function App() {
           {step === 2 && (
             <div className="card step-transition">
               <h2>Matriks Keputusan & Pembobotan</h2>
-              
+
+              {/* Quick Start Templates */}
+              <QuickStartTemplates
+                onApplyTemplate={handleApplyTemplate}
+                onLoadLaptopDataset={loadLaptopDataset}
+                addToast={addToast}
+              />
+
+              {/* Correlation Warning Banner (if any) */}
+              {correlationWarnings.length > 0 && (
+                <div style={{
+                  background: '#fffbeb', border: '1px solid #f6ad55',
+                  borderLeft: '4px solid #ed8936', borderRadius: 'var(--radius-md)',
+                  padding: '10px 16px', marginBottom: '16px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#744210' }}>
+                    ⚠️ {correlationWarnings.length} pasang kriteria berkorelasi tinggi terdeteksi.
+                  </span>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '11px' }}
+                    onClick={() => setShowCorrelationSection(prev => !prev)}
+                  >
+                    {showCorrelationSection ? 'Sembunyikan' : 'Lihat Detail'}
+                  </button>
+                </div>
+              )}
+
+              {/* Collapsible Correlation Heatmap */}
+              {showCorrelationSection && (
+                <div className="card" style={{ padding: '20px', marginBottom: '20px', background: 'var(--canvas-bg)' }}>
+                  <h3 style={{ marginBottom: '12px', fontSize: '14px' }}>🔗 Analisis Korelasi Antar-Kriteria</h3>
+                  <CorrelationHeatmap
+                    matrix={matrix}
+                    criterias={criterias}
+                    warnings={correlationWarnings}
+                  />
+                </div>
+              )}
+
+              {/* AHP Section — collapsible */}
               {showAHP && (
                 <div className="card" style={{ backgroundColor: 'var(--canvas-bg)', padding: '24px', marginBottom: '32px', border: '1px solid var(--accent-muted)' }}>
                   <h3 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                     <span>⚖ Pembobotan Berdasarkan Perbandingan Berpasangan (AHP)</span>
-                    <span className="badge badge-benefit">AHP Mode Aktif</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span className="badge badge-benefit">AHP Mode Aktif</span>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '11px' }}
+                        onClick={() => setShowAHP(false)}
+                      >
+                        Tutup ✕
+                      </button>
+                    </div>
                   </h3>
-                  <AHPMatrixInput 
-                    criteria={criterias} 
+                  <AHPMatrixInput
+                    criteria={criterias}
                     onSave={(weights) => {
                       setCriterias(prev => prev.map((c, idx) => ({ ...c, weight: weights[idx] })));
-                      setShowAHP(false); 
+                      setShowAHP(false);
                       addToast('Bobot kriteria AHP berhasil diselaraskan!', 'success', 'Weights Updated');
                     }}
                   />
@@ -739,6 +900,14 @@ function App() {
                     />
                   </div>
 
+                  {/* Scenario Manager */}
+                  <ScenarioManager
+                    criterias={criterias}
+                    rankings={rankings}
+                    sawRankings={sawRankings}
+                    onRestoreScenario={handleRestoreScenario}
+                  />
+
                   {/* Inline What-If Decision Matrix */}
                   <div className="card" style={{ padding: '24px', marginBottom: 0 }}>
                     <h3 style={{ marginBottom: '12px' }}>📊 Live What-If Matrix Sheet</h3>
@@ -787,6 +956,13 @@ function App() {
                   {/* Peringkat Bar Chart */}
                   <div className="card" style={{ padding: '24px', marginBottom: 0 }}>
                     <h3 style={{ marginBottom: '16px' }}>🏆 Komparasi Peringkat Dual-Metode</h3>
+
+                    {/* Robustness Index */}
+                    <RobustnessIndex rankings={rankings} stabilityRates={stabilityRates} />
+
+                    {/* Sanity Check Report */}
+                    <SanityCheckReport anomalies={sanityAnomalies} dataQuality={dataQualityReport} />
+
                     <ResultsChart 
                       rankings={rankings} 
                       stabilityRates={stabilityRates} 

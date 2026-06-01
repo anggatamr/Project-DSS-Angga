@@ -18,6 +18,117 @@
   --radius-sm: 6px;
 }
 
+/* Dark Mode */
+.dark {
+  --canvas-bg: #1a1612;
+  --card-bg: #252018;
+  --text-primary: #EDE8E0;
+  --text-secondary: #A89F94;
+  --accent-primary: #E8956A;
+  --accent-hover: #D37B55;
+  --accent-muted: #3D2E22;
+  --success: #8FBB62;
+  --danger: #E07070;
+  --border-color: #352D24;
+  --shadow-soft: 0 10px 30px -15px rgba(0, 0, 0, 0.3);
+  --shadow-strong: 0 20px 40px -10px rgba(0, 0, 0, 0.4);
+}
+
+.dark body {
+  background-color: var(--canvas-bg);
+  color: var(--text-primary);
+}
+
+.dark .card {
+  background: var(--card-bg);
+  border-color: var(--border-color);
+}
+
+.dark th {
+  background-color: #1a1612;
+}
+
+.dark td {
+  background-color: var(--card-bg);
+}
+
+.dark tr:nth-child(even) td {
+  background-color: #1e1a14;
+}
+
+.dark .form-control {
+  background-color: #1e1a14;
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+.dark .form-control:focus {
+  border-color: var(--accent-primary);
+}
+
+.dark .btn-secondary {
+  background-color: #2a2218;
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.dark .btn-secondary:hover {
+  background-color: #352D24;
+}
+
+.dark .alert-info {
+  background-color: #1a2535;
+  color: #90cdf4;
+  border-left-color: #4299e1;
+}
+
+.dark .alert-warning {
+  background-color: #2d2010;
+  color: #fbd38d;
+  border-left-color: #ed8936;
+}
+
+.dark .alert-danger {
+  background-color: #2d1515;
+  color: var(--danger);
+  border-left-color: var(--danger);
+}
+
+.dark .inline-edit-input {
+  color: var(--text-primary);
+}
+
+.dark .inline-edit-input:hover {
+  background-color: rgba(232, 149, 106, 0.08);
+}
+
+.dark .inline-edit-input:focus {
+  background-color: #1e1a14;
+}
+
+.dark .toggle-btn {
+  background: #352D24;
+}
+
+.dark .toast-item {
+  background: #252018;
+  border-color: var(--border-color);
+}
+
+.dark .toast-title {
+  color: var(--text-primary);
+}
+
+.dark .skeleton-line {
+  background: linear-gradient(90deg, #352D24 25%, #2a2218 50%, #352D24 75%);
+  background-size: 200% 100%;
+}
+
+.dark .skeleton-card {
+  background: var(--card-bg);
+  border-color: var(--border-color);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

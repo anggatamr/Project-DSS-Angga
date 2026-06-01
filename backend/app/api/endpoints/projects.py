@@ -215,6 +215,77 @@ def get_laptop_dataset_sample():
         "matrix": matrix
     }
 
+@router.get("/recruitment/dataset-sample")
+def get_recruitment_dataset_sample():
+    """
+    Loads and parses the recruitment dataset.
+    Returns criteria definitions, alternative names, and matrix values for the first 10 candidates.
+    """
+    possible_paths = [
+        "../recruitment_data.csv",
+        "./recruitment_data.csv",
+        "recruitment_data.csv",
+        "../../recruitment_data.csv",
+        "c:/Users/Angga/Documents/Percodingan Duniawi/Project-DSS-Angga/recruitment_data.csv"
+    ]
+
+    df = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                df = pd.read_csv(p)
+                break
+            except Exception:
+                continue
+
+    if df is None:
+        raise HTTPException(status_code=404, detail="Dataset recruitment_data.csv tidak ditemukan di server.")
+
+    df_sample = df.head(10).copy()
+
+    criterias = [
+        {"name": "Pengalaman (Tahun)", "weight": 0.25, "type": "benefit"},
+        {"name": "Skor Interview", "weight": 0.30, "type": "benefit"},
+        {"name": "Skor Skill", "weight": 0.25, "type": "benefit"},
+        {"name": "Skor Kepribadian", "weight": 0.20, "type": "benefit"},
+    ]
+
+    alternatives = []
+    matrix = []
+
+    for idx, row in df_sample.iterrows():
+        alt_name = f"Kandidat {idx + 1}"
+        alternatives.append({"name": alt_name})
+
+        try:
+            exp = float(row.get('ExperienceYears', 0))
+        except Exception:
+            exp = 0.0
+
+        try:
+            interview = float(row.get('InterviewScore', 50))
+        except Exception:
+            interview = 50.0
+
+        try:
+            skill = float(row.get('SkillScore', 50))
+        except Exception:
+            skill = 50.0
+
+        try:
+            personality = float(row.get('PersonalityScore', 50))
+        except Exception:
+            personality = 50.0
+
+        matrix.append([exp, interview, skill, personality])
+
+    return {
+        "criterias": criterias,
+        "alternatives": alternatives,
+        "matrix": matrix
+    }
+
+
 @router.post("/import-csv")
 def import_csv_file(file: UploadFile = File(...)):
     """
