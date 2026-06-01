@@ -78,7 +78,7 @@ const MLIntegratedResults = ({ result, method }) => {
                   {r.alternative_name}
                   {r.key_drivers && r.key_drivers.length > 0 && (
                     <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      Faktor: {r.key_drivers.slice(0, 2).join(', ')}
+                      Fitur ML: {r.key_drivers.slice(0, 2).join(', ')}
                     </div>
                   )}
                 </td>

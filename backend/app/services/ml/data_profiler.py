@@ -124,19 +124,33 @@ class SmartDataProfiler:
 
     def _infer_semantic_role(self, series: pd.Series, col: str, data_type: str) -> str:
         col_lower = col.lower()
+        # Remove separators for matching
+        col_clean = col_lower.replace('_', '').replace(' ', '')
+
         id_keywords = ["id", "index", "code", "serial", "no", "num", "uuid", "key"]
         if any(kw == col_lower or col_lower.endswith(f"_{kw}") or col_lower.startswith(f"{kw}_")
                for kw in id_keywords):
             return "identifier"
+
         if data_type == "text" and series.nunique() > 50:
             return "metadata"
+
         target_keywords = [
             "price", "cost", "score", "rating", "decision", "outcome",
             "target", "label", "result", "performance", "salary", "revenue",
-            "profit", "value", "grade", "rank", "quality", "hiring"
+            "profit", "value", "grade", "rank", "quality", "hiring",
+            "hired", "approved", "accepted", "rejected", "churn", "fraud",
+            "default", "diagnosis", "class", "category", "status", "strategy",
+            "recommendation", "output", "prediction", "response", "y"
         ]
-        if any(kw in col_lower for kw in target_keywords):
+        if any(kw in col_clean for kw in target_keywords):
             return "target"
+
+        # Binary columns (0/1 only) are likely labels/targets
+        unique_vals = set(series.dropna().unique())
+        if unique_vals <= {0, 1} and data_type == "numeric":
+            return "target"
+
         return "feature"
 
     def _calculate_statistics(self, series: pd.Series, data_type: str) -> Dict[str, Any]:

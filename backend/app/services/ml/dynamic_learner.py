@@ -92,6 +92,10 @@ class DynamicLearner:
         for c in self.profile.columns:
             if c.semantic_role in skip_roles:
                 skip_cols.add(c.name)
+            # Also skip other columns detected as target (output columns)
+            # to avoid data leakage
+            if c.semantic_role == "target" and c.name != target_col:
+                skip_cols.add(c.name)
 
         feature_cols = [c for c in df.columns if c not in skip_cols]
         if not feature_cols:

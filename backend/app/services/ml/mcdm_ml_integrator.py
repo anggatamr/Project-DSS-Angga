@@ -66,12 +66,24 @@ class MCDMMLIntegrator:
         ml_confidence: Optional[List[float]] = None
 
         # --- ML prediction ---
+        # Build a DataFrame using the TRAINING feature names (not DSS criteria names).
+        # Map by position: DSS matrix columns correspond positionally to training features.
         if use_ml_prediction and self.learner.models:
             try:
-                alt_df = pd.DataFrame(
-                    matrix,
-                    columns=criteria_names[:n_crits],
-                )
+                training_features = self.learner.feature_names
+                n_train_feats = len(training_features)
+                n_available = min(n_crits, n_train_feats)
+
+                # Build DataFrame with training feature names, using matrix values by position
+                alt_data = {}
+                for j, feat_name in enumerate(training_features[:n_available]):
+                    alt_data[feat_name] = [matrix[i][j] for i in range(n_alts)]
+
+                # Fill any remaining training features with 0
+                for feat_name in training_features[n_available:]:
+                    alt_data[feat_name] = [0.0] * n_alts
+
+                alt_df = pd.DataFrame(alt_data)
                 preds, meta = self.learner.predict(alt_df)
                 ml_predictions = np.array(preds, dtype=float)
                 ml_confidence = meta.get("confidence", [0.80] * n_alts)
@@ -121,7 +133,13 @@ class MCDMMLIntegrator:
         )
 
         feature_importance = self.learner.get_feature_importance()
-        top_drivers = list(feature_importance.keys())[:3]
+        # Exclude the target column and any column that looks like an output
+        # from the displayed key drivers
+        target_col = self.learner.target_name
+        top_drivers = [
+            k for k in feature_importance.keys()
+            if k != target_col
+        ][:3]
 
         rankings = []
         for rank_pos, alt_idx in enumerate(ranked):
@@ -131,8 +149,6 @@ class MCDMMLIntegrator:
             explanation = f"Peringkat #{rank_pos + 1} berdasarkan {method}"
             if ml_pred_val is not None:
                 explanation += f" | Prediksi ML: {ml_pred_val:.2f} (kepercayaan {conf:.0%})"
-            if top_drivers:
-                explanation += f" | Faktor utama: {', '.join(top_drivers[:2])}"
 
             rankings.append({
                 "rank": rank_pos + 1,
