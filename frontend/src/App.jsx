@@ -14,6 +14,7 @@ import RobustnessIndex from './components/RobustnessIndex';
 import CorrelationHeatmap from './components/CorrelationHeatmap';
 import SanityCheckReport from './components/SanityCheckReport';
 import QuickStartTemplates from './components/QuickStartTemplates';
+import MLEnginePanel from './components/ml/MLEnginePanel';
 import { solveSAWClient, solveTOPSISClient } from './utils/clientSolver';
 import { calculateSpearman } from './utils/spearman';
 import { analyzeCriteriaCorrelation } from './utils/correlationAnalysis';
@@ -1092,6 +1093,15 @@ function App() {
                 </div>
               )}
 
+              {/* ML Engine Panel — collapsible */}
+              <MLEnginePanelSection
+                criterias={criterias}
+                alternatives={alternatives}
+                matrix={matrix}
+                chosenMethod={chosenMethod}
+                addToast={addToast}
+              />
+
               <div style={{ marginTop: '32px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
                 <button className="btn btn-secondary" onClick={() => setStep(2)}>
                   ⇠ Edit Matriks
@@ -1219,6 +1229,67 @@ function App() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ML Engine collapsible wrapper ───────────────────────────────────────────
+function MLEnginePanelSection({ criterias, alternatives, matrix, chosenMethod, addToast }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="card" style={{ marginTop: '24px', padding: 0, overflow: 'hidden' }}>
+      {/* Header toggle */}
+      <div
+        onClick={() => setOpen(p => !p)}
+        style={{
+          padding: '18px 24px',
+          cursor: 'pointer',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: open
+            ? 'linear-gradient(135deg, #ebf8ff, #e6fffa)'
+            : 'var(--card-bg)',
+          borderBottom: open ? '1px solid #90cdf4' : 'none',
+          transition: 'var(--transition)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '24px' }}>🤖</span>
+          <div>
+            <div style={{ fontWeight: '800', fontSize: '15px', color: open ? '#2b6cb0' : 'var(--text-primary)' }}>
+              Universal ML Engine
+            </div>
+            <div style={{ fontSize: '12px', color: open ? '#2b6cb0' : 'var(--text-secondary)', fontWeight: '500' }}>
+              Auto-profiling · Multi-model training · MCDM+ML integrated ranking · Sensitivity dengan confidence bounds
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{
+            fontSize: '10px', fontWeight: '800', padding: '3px 10px', borderRadius: '10px',
+            background: '#ebf8ff', color: '#2b6cb0', border: '1px solid #90cdf4'
+          }}>
+            NEW
+          </span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '18px', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }}>
+            ▾
+          </span>
+        </div>
+      </div>
+
+      {/* Body */}
+      {open && (
+        <div style={{ padding: '24px' }}>
+          <MLEnginePanel
+            criterias={criterias}
+            alternatives={alternatives}
+            matrix={matrix}
+            chosenMethod={chosenMethod}
+            addToast={addToast}
+          />
         </div>
       )}
     </div>
