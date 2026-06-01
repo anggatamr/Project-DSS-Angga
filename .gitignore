@@ -15,8 +15,12 @@ backend/app/db/__pycache__/
 backend/app/models/__pycache__/
 backend/app/schemas/__pycache__/
 backend/app/services/__pycache__/
+backend/app/services/ml/__pycache__/
 backend/dss_database.db
+backend/backend/models/
+backend/models/
 *.pyc
+*.joblib
 
 # Node & Frontend build
 frontend/node_modules/
