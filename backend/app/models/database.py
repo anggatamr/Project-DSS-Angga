@@ -61,9 +61,10 @@ class MatrixValue(Base):
     criteria = relationship("Criteria", back_populates="matrix_values")
     alternative = relationship("Alternative", back_populates="matrix_values")
 
-# Database session setup
-DATABASE_URL = "sqlite:///./dss_database.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# Database session setup — use centralized config to support different environments
+from app.core.config import settings
+
+engine = create_engine(settings.DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

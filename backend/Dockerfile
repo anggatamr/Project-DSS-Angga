@@ -7,8 +7,9 @@ COPY ./requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
 COPY ./app /code/app
-COPY ./laptop_price\ -\ dataset.csv /code/laptop_price\ -\ dataset.csv
+COPY ["./laptop_price - dataset.csv", "/code/laptop_price - dataset.csv"]
 COPY ./recruitment_data.csv /code/recruitment_data.csv
 
-# Hugging Face Spaces secara default menggunakan port 7860
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Port 10000 adalah default Render; override via PORT env var jika perlu
+ENV PORT=10000
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

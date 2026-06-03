@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: project-dss-angga-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: RUNNING_IN_DOCKER
+        value: "true"
+      - key: PORT
+        value: "10000"
+    healthCheckPath: /
