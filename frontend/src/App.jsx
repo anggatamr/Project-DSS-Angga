@@ -123,38 +123,72 @@ function App() {
   // 2. State Retention & Auto-save (Every 5 seconds)
   const isInitialMount = useRef(true);
 
-  // Load state from LocalStorage on mount
+  // Load state from LocalStorage on mount, then validate projectId against backend
   useEffect(() => {
     const saved = localStorage.getItem('dss_state');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Version guard: if saved state is missing new fields, clear it to avoid crashes
-        const stateVersion = parsed._version || 1;
-        if (stateVersion < 2) {
-          localStorage.removeItem('dss_state');
-          isInitialMount.current = false;
-          return;
-        }
-        if (parsed.projectId) setProjectId(parsed.projectId);
-        if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
-        if (parsed.step) setStep(parsed.step);
-        if (parsed.chosenMethod) setChosenMethod(parsed.chosenMethod);
-        if (parsed.criterias) setCriterias(parsed.criterias);
-        if (parsed.alternatives) setAlternatives(parsed.alternatives);
-        if (parsed.matrix) setMatrix(parsed.matrix);
-        if (parsed.rankings) setRankings(parsed.rankings);
-        if (parsed.sawRankings) setSawRankings(parsed.sawRankings);
-        if (parsed.spearman) setSpearman(parsed.spearman);
-        if (parsed.stabilityRates) setStabilityRates(parsed.stabilityRates);
-        if (parsed.qAnswers) setQAnswers(parsed.qAnswers);
-        if (parsed.recommendation) setRecommendation(parsed.recommendation);
-      } catch (e) {
-        console.error("Failed to parse saved state", e);
-        localStorage.removeItem('dss_state');
-      }
+    if (!saved) {
+      isInitialMount.current = false;
+      return;
     }
-    isInitialMount.current = false;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(saved);
+    } catch (e) {
+      console.error("Failed to parse saved state", e);
+      localStorage.removeItem('dss_state');
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Version guard
+    const stateVersion = parsed._version || 1;
+    if (stateVersion < 2) {
+      localStorage.removeItem('dss_state');
+      isInitialMount.current = false;
+      return;
+    }
+
+    const restoreState = (validProjectId) => {
+      if (validProjectId && parsed.projectId) setProjectId(parsed.projectId);
+      if (parsed.projectTitle) setProjectTitle(parsed.projectTitle);
+      if (parsed.step) setStep(parsed.step);
+      if (parsed.chosenMethod) setChosenMethod(parsed.chosenMethod);
+      if (parsed.criterias) setCriterias(parsed.criterias);
+      if (parsed.alternatives) setAlternatives(parsed.alternatives);
+      if (parsed.matrix) setMatrix(parsed.matrix);
+      if (parsed.rankings) setRankings(parsed.rankings);
+      if (parsed.sawRankings) setSawRankings(parsed.sawRankings);
+      if (parsed.spearman) setSpearman(parsed.spearman);
+      if (parsed.stabilityRates) setStabilityRates(parsed.stabilityRates);
+      if (parsed.qAnswers) setQAnswers(parsed.qAnswers);
+      if (parsed.recommendation) setRecommendation(parsed.recommendation);
+      isInitialMount.current = false;
+    };
+
+    // Validate that the saved projectId still exists on the backend
+    if (parsed.projectId) {
+      fetch(`${BACKEND_URL}/api/v1/projects/${parsed.projectId}`)
+        .then(res => {
+          if (res.ok) {
+            // Project exists — restore full state
+            restoreState(true);
+          } else {
+            // Project not found on backend (e.g. after server restart) — restore UI state
+            // but drop the stale projectId so a new one gets created on next save
+            console.warn('Saved projectId not found on backend, resetting project ID');
+            restoreState(false);
+            setProjectId('');
+            setStep(1);
+          }
+        })
+        .catch(() => {
+          // Backend unreachable — restore state optimistically, errors will surface on next action
+          restoreState(true);
+        });
+    } else {
+      restoreState(false);
+    }
   }, []);
 
   // Auto-save timer
