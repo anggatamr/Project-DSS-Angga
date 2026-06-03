@@ -120,8 +120,9 @@ const MatrixInputTable = ({
     const formData = new FormData();
     formData.append('file', file);
     
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/v1/projects/import-csv', {
+      const res = await fetch(`${backendUrl}/api/v1/projects/import-csv`, {
         method: 'POST',
         body: formData
       });
